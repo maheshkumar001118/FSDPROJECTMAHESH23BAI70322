@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-smoke-light:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend images
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend/gateway
+          file: ./backend/gateway/Dockerfile
+          push: false
+          tags: gateway:ci
+
+      - name: Build user-service image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend/user-service
+          file: ./backend/user-service/Dockerfile
+          push: false
+          tags: user-service:ci
+
+      - name: Build post-service image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend/post-service
+          file: ./backend/post-service/Dockerfile
+          push: false
+          tags: post-service:ci
+
+      - name: Build comment-service image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend/comment-service
+          file: ./backend/comment-service/Dockerfile
+          push: false
+          tags: comment-service:ci
+
+      - name: Start services with docker compose
+        run: |
+          cd backend
+          docker compose up -d --build
+
+      - name: Wait for gateway health
+        run: |
+          for i in {1..30}; do
+            if curl -sSf http://localhost:8080/health >/dev/null; then echo gateway ok && break; fi
+            sleep 2
+          done
+
+      - name: Check service health endpoints
+        run: |
+          echo "gateway:" && curl -sS http://localhost:8080/health || true
+          echo "user:" && curl -sS http://localhost:3001/health || true
+          echo "post:" && curl -sS http://localhost:3002/health || true
+          echo "comment:" && curl -sS http://localhost:3003/health || true
+
+      - name: Tear down
+        if: always()
+        run: |
+          cd backend
+          docker compose down --volumes
